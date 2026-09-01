@@ -12,6 +12,7 @@
     "README.md"
   ],
   "scripts": {
+    "prepublishOnly": "npm run build",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "test": "node test/tools.mjs"
