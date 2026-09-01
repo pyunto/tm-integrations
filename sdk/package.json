@@ -1,0 +1,56 @@
+{
+  "name": "@pyunto/tm-sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for the Pyunto Time Management public REST API (v1) with client-side E2EE decryption.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node test/roundtrip.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "libsodium-wrappers-sumo": "^0.7.13"
+  },
+  "devDependencies": {
+    "@types/libsodium-wrappers-sumo": "^0.7.8",
+    "@types/node": "^20.11.0",
+    "typescript": "^5.4.0"
+  },
+  "homepage": "https://tm.pyunto.com/docs/mcp.en.md",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tomsonoda/pyunto-tm-integrations.git",
+    "directory": "sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/tomsonoda/pyunto-tm-integrations/issues"
+  },
+  "keywords": [
+    "pyunto",
+    "time-tracking",
+    "time-management",
+    "gantt",
+    "e2ee",
+    "sdk",
+    "api-client"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

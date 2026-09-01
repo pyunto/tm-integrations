@@ -1,0 +1,54 @@
+{
+  "name": "@pyunto/tm-mcp",
+  "version": "0.1.0",
+  "description": "Model Context Protocol server for Pyunto Time Management — lets Claude Code, Codex and other MCP clients read and log time.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "pyunto-tm-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "test": "node test/tools.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@pyunto/tm-sdk": "^0.1.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.4.0"
+  },
+  "homepage": "https://tm.pyunto.com/docs/mcp.en.md",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tomsonoda/pyunto-tm-integrations.git",
+    "directory": "mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/tomsonoda/pyunto-tm-integrations/issues"
+  },
+  "keywords": [
+    "pyunto",
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "time-tracking",
+    "time-management",
+    "ai",
+    "agent"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
