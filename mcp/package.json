@@ -31,11 +31,11 @@
   "homepage": "https://tm.pyunto.com/docs/mcp.en.md",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tomsonoda/pyunto-tm-integrations.git",
+    "url": "git+https://github.com/pyunto/tm-integrations.git",
     "directory": "mcp"
   },
   "bugs": {
-    "url": "https://github.com/tomsonoda/pyunto-tm-integrations/issues"
+    "url": "https://github.com/pyunto/tm-integrations/issues"
   },
   "keywords": [
     "pyunto",
@@ -48,7 +48,6 @@
     "agent"
   ],
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   }
 }
