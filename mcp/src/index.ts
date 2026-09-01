@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Pyunto Time Management — MCP server (stdio).
  *
@@ -24,7 +23,7 @@
  * Nothing is cached to disk and no key material leaves the process.
  */
 import { readFileSync } from "node:fs";
-import { pathToFileURL } from "node:url";
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -443,7 +442,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
 server.setRequestHandler(CallToolRequestSchema, async (req) =>
   callTool(req.params.name, (req.params.arguments ?? {}) as Args));
 
-async function main() {
+/** Attach the stdio transport and serve. Called only by cli.ts, so
+ *  importing this module (the tests do) never touches stdio. */
+export function start(): void {
   if (!API_KEY) {
     // stderr, never stdout — stdout carries the JSON-RPC frames.
     console.error(
@@ -451,19 +452,12 @@ async function main() {
       "under Settings → Account → API keys, then set it in your MCP client config.");
     process.exit(1);
   }
-  await server.connect(new StdioServerTransport());
-  console.error(`pyunto-tm MCP server ready (${BASE_URL})`);
-}
-
-// Only start the transport when launched as a program. Importing this
-// module (the test suite does) must not take over stdio.
-const invokedDirectly = process.argv[1]
-  && import.meta.url === pathToFileURL(process.argv[1]).href;
-if (invokedDirectly) {
-  main().catch((e) => {
-    console.error("fatal:", e);
-    process.exit(1);
-  });
+  server.connect(new StdioServerTransport())
+    .then(() => console.error(`pyunto-tm MCP server ready (${BASE_URL})`))
+    .catch((e) => {
+      console.error("fatal:", e);
+      process.exit(1);
+    });
 }
 
 export { callTool, toMinutes, hhmm, TOOLS };
