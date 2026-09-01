@@ -9,8 +9,8 @@
     "mcp"
   ],
   "scripts": {
-    "build": "npm run build -w pyunto-tm-sdk && npm run build -w pyunto-tm-mcp",
-    "test": "npm run test -w pyunto-tm-sdk && npm run test -w pyunto-tm-mcp"
+    "build": "npm run build -w @pyunto/tm-sdk && npm run build -w @pyunto/tm-mcp",
+    "test": "npm run test -w @pyunto/tm-sdk && npm run test -w @pyunto/tm-mcp"
   },
   "engines": {
     "node": ">=18"

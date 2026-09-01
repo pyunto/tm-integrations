@@ -5,8 +5,8 @@ a time-management and project-planning service with end-to-end encryption.
 
 | Package | What it is |
 |---|---|
-| [`pyunto-tm-sdk`](./sdk) | TypeScript client for the public REST API (v1), with client-side E2EE decryption |
-| [`pyunto-tm-mcp`](./mcp) | MCP (Model Context Protocol) server — connects Claude Code, Claude Desktop, Codex CLI, Cursor and other AI clients to an account |
+| [`@pyunto/tm-sdk`](./sdk) | TypeScript client for the public REST API (v1), with client-side E2EE decryption |
+| [`@pyunto/tm-mcp`](./mcp) | MCP (Model Context Protocol) server — connects Claude Code, Claude Desktop, Codex CLI, Cursor and other AI clients to an account |
 
 **The service itself is not open source.** This repository contains only the
 client side: HTTP calls against the documented public API, plus the crypto
@@ -30,7 +30,7 @@ No clone needed — the published package runs straight from npm:
 ```bash
 claude mcp add pyunto-tm \
   --env PYUNTO_TM_API_KEY=ptm_your_key \
-  -- npx -y pyunto-tm-mcp
+  -- npx -y @pyunto/tm-mcp
 ```
 
 Full setup instructions, including Claude Desktop, Codex CLI and Cursor:
@@ -43,11 +43,11 @@ what an integration may read or write, and a key can be revoked at any time.
 ## Quick start (SDK)
 
 ```bash
-npm install pyunto-tm-sdk
+npm install @pyunto/tm-sdk
 ```
 
 ```ts
-import { PyuntoTM } from "pyunto-tm-sdk";
+import { PyuntoTM } from "@pyunto/tm-sdk";
 
 const tm = new PyuntoTM({ apiKey: process.env.PTM_KEY! });
 
@@ -69,7 +69,7 @@ npm run build     # both packages
 npm test          # sdk crypto round-trips + mcp tools against a stub API
 ```
 
-`mcp` depends on `pyunto-tm-sdk` by version, so the published package resolves
+`mcp` depends on `@pyunto/tm-sdk` by version, so the published package resolves
 it from the registry while local development links the workspace copy.
 
 ## Security

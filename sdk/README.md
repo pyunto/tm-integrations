@@ -1,4 +1,4 @@
-# pyunto-tm-sdk
+# @pyunto/tm-sdk
 
 TypeScript SDK for the [Pyunto Time Management](https://tm.pyunto.com) public
 REST API (v1), with optional client-side end-to-end-encryption (E2EE)
@@ -7,7 +7,7 @@ decryption. Works in Node 18+ and modern browsers.
 ## Install
 
 ```bash
-npm install pyunto-tm-sdk
+npm install @pyunto/tm-sdk
 ```
 
 ## Getting an API key
@@ -30,7 +30,7 @@ Dates, times, durations and aggregates are always plaintext, and legacy
 (non-E2EE) projects return names/memos in plaintext too:
 
 ```ts
-import { PyuntoTM } from "pyunto-tm-sdk";
+import { PyuntoTM } from "@pyunto/tm-sdk";
 
 const tm = new PyuntoTM({ apiKey: process.env.PTM_KEY! });
 

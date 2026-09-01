@@ -32,8 +32,8 @@ import {
   ListToolsRequestSchema,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import { PyuntoTM, PyuntoTMError } from "pyunto-tm-sdk";
-import type { V1Project, V1Task } from "pyunto-tm-sdk";
+import { PyuntoTM, PyuntoTMError } from "@pyunto/tm-sdk";
+import type { V1Project, V1Task } from "@pyunto/tm-sdk";
 
 const API_KEY = process.env.PYUNTO_TM_API_KEY ?? "";
 const BASE_URL = process.env.PYUNTO_TM_BASE_URL ?? "https://tm.pyunto.com";

@@ -1,4 +1,4 @@
-# pyunto-tm-mcp
+# @pyunto/tm-mcp
 
 MCP (Model Context Protocol) server for
 [Pyunto Time Management](https://tm.pyunto.com). Connects Claude Code, Claude
@@ -28,7 +28,7 @@ cannot.
 ## Install
 
 ```bash
-npx -y pyunto-tm-mcp        # what an MCP client config runs
+npx -y @pyunto/tm-mcp        # what an MCP client config runs
 ```
 
 ## Build from source
@@ -61,7 +61,7 @@ config file.
   "mcpServers": {
     "pyunto-tm": {
       "command": "npx",
-      "args": ["-y", "pyunto-tm-mcp"],
+      "args": ["-y", "@pyunto/tm-mcp"],
       "env": { "PYUNTO_TM_API_KEY": "ptm_…" }
     }
   }
