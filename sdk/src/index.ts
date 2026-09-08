@@ -61,6 +61,11 @@ export interface V1Block {
   created_by: number | null;
 }
 
+export interface V1DeletedBlock extends V1Block {
+  deleted_at: string | null;
+  restorable_until: string;
+}
+
 export interface V1RecordRow {
   date: string;
   project_id: number;
@@ -237,11 +242,33 @@ export class PyuntoTM {
     return this.req("PATCH", `/blocks/${id}`, { ...rest, memo });
   }
 
-  /** Delete one block. Irreversible — the row and its attachments are
-   *  removed outright. Returns what was deleted so the caller can report
-   *  it. There is no bulk form on purpose. */
+  /** Delete one block. Recoverable via restoreBlock() until the server's
+   *  retention window closes (14 days), after which the row and its
+   *  attachments are purged for good. Returns what was deleted so the
+   *  caller can report it. There is no bulk form on purpose. */
   deleteBlock(id: number): Promise<V1Block> {
     return this.req("DELETE", `/blocks/${id}`);
+  }
+
+  /** Blocks deleted but still restorable, newest first. */
+  async deletedBlocks(opts: DecryptOpts = {}): Promise<V1DeletedBlock[]> {
+    const rows = await this.req<V1DeletedBlock[]>("GET", "/blocks/deleted");
+    if (opts.decrypt) {
+      const projMap = await this.projectMap();
+      for (const b of rows) {
+        const proj = projMap.get(b.project_id);
+        if (proj && proj.encryption_version >= 1 && b.memo_enc) {
+          const dek = await this.dekFor(proj);
+          if (dek) b.memo = await decryptField(dek, b.memo_enc);
+        }
+      }
+    }
+    return rows;
+  }
+
+  /** Put a deleted block back. A no-op on a block that is not deleted. */
+  restoreBlock(id: number): Promise<V1Block> {
+    return this.req("POST", `/blocks/${id}/restore`);
   }
 
   // ── E2EE ───────────────────────────────────────────────────────────────────

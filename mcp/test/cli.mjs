@@ -72,7 +72,8 @@ check("lists its tools", () => {
   const names = r.result.tools.map((t) => t.name);
   for (const expected of ["whoami", "list_projects", "list_tasks",
                           "list_time_blocks", "time_summary", "log_time",
-                          "update_time_block", "delete_time_block"]) {
+                          "update_time_block", "delete_time_block",
+                          "list_deleted_time_blocks", "restore_time_block"]) {
     assert.ok(names.includes(expected), `missing tool: ${expected}`);
   }
 });

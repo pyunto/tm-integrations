@@ -35,6 +35,8 @@ const BLOCKS = [
 const posted = [];
 const patched = [];
 const deleted = [];
+const softDeleted = [];
+const restored = [];
 
 function stub() {
   return new Promise((resolve) => {
@@ -80,11 +82,27 @@ function stub() {
         });
         return;
       }
+      if (url.pathname === "/api/v1/blocks/deleted" && req.method === "GET") {
+        return send(200, softDeleted.map((b) => ({
+          ...b, deleted_at: "2026-09-08T01:00:00+00:00",
+          restorable_until: "2026-09-22T01:00:00+00:00",
+        })));
+      }
+      const restoreMatch = /^\/api\/v1\/blocks\/(\d+)\/restore$/.exec(url.pathname);
+      if (restoreMatch && req.method === "POST") {
+        const id = Number(restoreMatch[1]);
+        const i = softDeleted.findIndex((b) => b.id === id);
+        if (i < 0) return send(404, { detail: "block not found" });
+        const [back] = softDeleted.splice(i, 1);
+        restored.push(id);
+        return send(200, back);
+      }
       if (patchMatch && req.method === "DELETE") {
         const id = Number(patchMatch[1]);
         const target = BLOCKS.find((b) => b.id === id);
         if (!target) return send(404, { detail: "block not found" });
         deleted.push(id);
+        softDeleted.push(target);
         return send(200, target);
       }
       if (url.pathname === "/api/v1/service-record") {
@@ -268,7 +286,10 @@ check("reports what was deleted, not just ok", () => {
   assert.equal(removed.project, "Alpha");
   assert.equal(removed.memo, "scaffolding");
 });
-check("says the deletion is permanent", () => assert.match(removed.permanent, /no undo/i));
+check("gives the recovery deadline instead of calling it final", () => {
+  assert.match(removed.recoverable_until, /^\d{4}-\d{2}-\d{2}$/);
+  assert.match(removed.note, /restore_time_block/);
+});
 const noId = await callTool("delete_time_block", {});
 check("requires a block id", () => {
   assert.equal(noId.isError, true);
@@ -284,7 +305,29 @@ check("tells the model to confirm the specific block first", () => {
   assert.match(del.description, /MUST show the user/);
   assert.match(del.description, /one at a time/);
   assert.match(del.description, /cannot be undone/);
+  assert.match(del.description, /14 days/);
 });
+
+console.log("restore");
+const binned = json(await callTool("list_deleted_time_blocks", {}));
+check("lists what is still recoverable, with the deadline", () => {
+  assert.equal(binned.count, 1);
+  assert.equal(binned.blocks[0].id, 101);
+  assert.equal(binned.blocks[0].project, "Alpha");
+  assert.equal(binned.blocks[0].restorable_until, "2026-09-22T01:00:00+00:00");
+});
+const back = json(await callTool("restore_time_block", { block_id: 101 }));
+check("puts the block back", () => {
+  assert.equal(back.restored, true);
+  assert.equal(back.date, "2026-07-02");
+  assert.deepEqual(restored, [101]);
+});
+const emptyBin = json(await callTool("list_deleted_time_blocks", {}));
+check("the restored block leaves the recoverable list", () =>
+  assert.equal(emptyBin.count, 0));
+const gone = await callTool("restore_time_block", { block_id: 999 });
+check("restoring something already purged is an error, not a crash", () =>
+  assert.equal(gone.isError, true));
 
 srv.close();
 console.log(`\n${n} checks passed`);

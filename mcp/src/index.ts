@@ -282,8 +282,11 @@ const TOOLS: Tool[] = [
       "start and end time, project, task and memo, from list_time_blocks) and get " +
       "an explicit yes for that specific block. Never infer the block from a vague " +
       "instruction, and never delete several blocks because the user described a " +
-      "range — confirm and delete them one at a time. Requires the blocks:delete " +
-      "scope, which is separate from blocks:write and has to be granted deliberately.",
+      "range — confirm and delete them one at a time. A deleted block can be put " +
+      "back with restore_time_block for 14 days, after which it and its attachments " +
+      "are purged for good; say so when you report the deletion. Requires the " +
+      "blocks:delete scope, which is separate from blocks:write and has to be " +
+      "granted deliberately.",
     inputSchema: {
       type: "object",
       properties: {
@@ -291,6 +294,31 @@ const TOOLS: Tool[] = [
           type: "number",
           description: "From list_time_blocks. Exactly one block is deleted.",
         },
+      },
+      required: ["block_id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "list_deleted_time_blocks",
+    description:
+      "Time blocks that were deleted but can still be restored, newest first, " +
+      "each with the date it was deleted and the deadline for putting it back. " +
+      "Use it to find the block_id for restore_time_block when the user says they " +
+      "deleted something by mistake. Requires the blocks:read scope.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "restore_time_block",
+    description:
+      "Put a deleted time block back on the calendar, along with any files that " +
+      "were attached to it. Get block_id from list_deleted_time_blocks. Works only " +
+      "within the 14-day recovery window; after that the block is gone for good. " +
+      "Requires the blocks:write scope.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        block_id: { type: "number", description: "From list_deleted_time_blocks." },
       },
       required: ["block_id"],
       additionalProperties: false,
@@ -521,9 +549,14 @@ async function dispatch(name: string, args: Args) {
       // The API returns the row it removed, so the reply can name exactly
       // what is gone rather than a bare acknowledgement.
       const gone = await tm.deleteBlock(blockId);
+      // The window is fixed server-side; report the deadline so the user
+      // knows how long they have rather than being told it is final.
+      const gone_until = new Date(Date.now() + 14 * 864e5).toISOString().slice(0, 10);
       return ok({
         deleted: true,
-        permanent: "This block and its attachments are gone; there is no undo.",
+        recoverable_until: gone_until,
+        note: "Restorable with restore_time_block until the date above; after that "
+          + "the block and its attachments are purged permanently.",
         id: gone.id,
         date: gone.date,
         start: hhmm(gone.start_min),
@@ -535,6 +568,46 @@ async function dispatch(name: string, args: Args) {
       }, await encryptionNote(projRows));
     }
 
+    case "list_deleted_time_blocks": {
+      const decrypt = await ensureUnlocked();
+      const [projRows, taskRows, rows] = await Promise.all([
+        projects(), tasks(), tm.deletedBlocks({ decrypt }),
+      ]);
+      return ok({
+        count: rows.length,
+        blocks: rows.map((b) => ({
+          id: b.id,
+          date: b.date,
+          start: hhmm(b.start_min),
+          end: hhmm(b.end_min),
+          hours: Number(hours(b.end_min - b.start_min)),
+          project: nameOf(projRows, b.project_id),
+          task: b.task_id != null ? nameOf(taskRows, b.task_id) : null,
+          memo: b.memo,
+          deleted_at: b.deleted_at,
+          restorable_until: b.restorable_until,
+        })),
+      }, await encryptionNote(projRows));
+    }
+
+    case "restore_time_block": {
+      const blockId = Number(args.block_id);
+      if (!Number.isFinite(blockId)) throw new Error("block_id is required");
+      const [projRows, taskRows] = await Promise.all([projects(), tasks()]);
+      const back = await tm.restoreBlock(blockId);
+      return ok({
+        restored: true,
+        id: back.id,
+        date: back.date,
+        start: hhmm(back.start_min),
+        end: hhmm(back.end_min),
+        hours: Number(hours(back.end_min - back.start_min)),
+        project: nameOf(projRows, back.project_id),
+        task: back.task_id != null ? nameOf(taskRows, back.task_id) : null,
+        memo: back.memo,
+      }, await encryptionNote(projRows));
+    }
+
     default:
       throw new Error(`unknown tool: ${name}`);
   }
@@ -543,7 +616,7 @@ async function dispatch(name: string, args: Args) {
 // ── Wire up ──────────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: "pyunto-tm", version: "0.2.0" },
+  { name: "pyunto-tm", version: "0.3.0" },
   { capabilities: { tools: {} } },
 );
 
