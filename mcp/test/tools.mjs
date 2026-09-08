@@ -33,6 +33,8 @@ const BLOCKS = [
 ];
 
 const posted = [];
+const patched = [];
+const deleted = [];
 
 function stub() {
   return new Promise((resolve) => {
@@ -63,6 +65,27 @@ function stub() {
                       start_min: body.start_min, end_min: body.end_min });
         });
         return;
+      }
+      const patchMatch = /^\/api\/v1\/blocks\/(\d+)$/.exec(url.pathname);
+      if (patchMatch && req.method === "PATCH") {
+        const id = Number(patchMatch[1]);
+        const target = BLOCKS.find((b) => b.id === id);
+        if (!target) return send(404, { detail: "block not found" });
+        let raw = "";
+        req.on("data", (c) => { raw += c; });
+        req.on("end", () => {
+          const body = JSON.parse(raw);
+          patched.push({ id, body });
+          send(200, { ...target, ...body, memo: body.memo ?? target.memo });
+        });
+        return;
+      }
+      if (patchMatch && req.method === "DELETE") {
+        const id = Number(patchMatch[1]);
+        const target = BLOCKS.find((b) => b.id === id);
+        if (!target) return send(404, { detail: "block not found" });
+        deleted.push(id);
+        return send(200, target);
       }
       if (url.pathname === "/api/v1/service-record") {
         const f = url.searchParams.get("date_from"), t = url.searchParams.get("date_to");
@@ -209,6 +232,58 @@ const missing = await callTool("log_time",
 check("names the fix when the project id is unknown", () => {
   assert.equal(missing.isError, true);
   assert.match(missing.content[0].text, /list_projects/);
+});
+
+console.log("update_time_block");
+const updated = json(await callTool("update_time_block",
+  { block_id: 100, start: "10:00", end: "11:30" }));
+check("patches only what was passed", () => {
+  assert.equal(patched.at(-1).id, 100);
+  assert.deepEqual(patched.at(-1).body, { start_min: 600, end_min: 690 });
+});
+check("reports the result with names resolved", () => {
+  assert.equal(updated.updated, true);
+  assert.equal(updated.project, "Alpha");
+  assert.equal(updated.hours, 1.5);
+});
+const noop = await callTool("update_time_block", { block_id: 100 });
+check("refuses a patch that changes nothing", () => {
+  assert.equal(noop.isError, true);
+  assert.match(noop.content[0].text, /nothing to change/);
+});
+const badOrder = await callTool("update_time_block",
+  { block_id: 100, start: "12:00", end: "11:00" });
+check("rejects end before start", () => assert.equal(badOrder.isError, true));
+const missingBlock = await callTool("update_time_block", { block_id: 4242, start: "09:00" });
+check("surfaces a 404 as an error, not a crash", () =>
+  assert.equal(missingBlock.isError, true));
+
+console.log("delete_time_block");
+const removed = json(await callTool("delete_time_block", { block_id: 101 }));
+check("deletes exactly the id given", () => assert.deepEqual(deleted, [101]));
+check("reports what was deleted, not just ok", () => {
+  assert.equal(removed.deleted, true);
+  assert.equal(removed.date, "2026-07-02");
+  assert.equal(removed.start, "13:00");
+  assert.equal(removed.project, "Alpha");
+  assert.equal(removed.memo, "scaffolding");
+});
+check("says the deletion is permanent", () => assert.match(removed.permanent, /no undo/i));
+const noId = await callTool("delete_time_block", {});
+check("requires a block id", () => {
+  assert.equal(noId.isError, true);
+  assert.match(noId.content[0].text, /block_id is required/);
+});
+check("exposes no bulk delete", () => {
+  const del = TOOLS.find((t) => t.name === "delete_time_block");
+  assert.deepEqual(Object.keys(del.inputSchema.properties), ["block_id"]);
+  assert.equal(del.inputSchema.properties.block_id.type, "number");
+});
+check("tells the model to confirm the specific block first", () => {
+  const del = TOOLS.find((t) => t.name === "delete_time_block");
+  assert.match(del.description, /MUST show the user/);
+  assert.match(del.description, /one at a time/);
+  assert.match(del.description, /cannot be undone/);
 });
 
 srv.close();

@@ -245,6 +245,57 @@ const TOOLS: Tool[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "update_time_block",
+    description:
+      "Change an already-recorded time block: its date, start/end times, memo, " +
+      "or the task it counts towards. Get block_id from list_time_blocks. Only " +
+      "the fields you pass change. Tell the user what the block currently says " +
+      "and what it will say before calling this. Requires the blocks:write scope; " +
+      "changing a memo on an end-to-end-encrypted project also needs " +
+      "PYUNTO_TM_PASSWORD, and project_id so the memo is encrypted under the " +
+      "right key.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        block_id: { type: "number", description: "From list_time_blocks." },
+        date: { type: "string", description: "YYYY-MM-DD." },
+        start: { type: "string", description: '"HH:MM" (24h) or minutes past midnight.' },
+        end: { type: "string", description: '"HH:MM" (24h) or minutes past midnight.' },
+        memo: { type: "string", description: "Replaces the memo. Needs project_id." },
+        task_id: { type: "number", description: "Task to attribute the time to; 0 detaches it." },
+        project_id: {
+          type: "number",
+          description: "The block's project, from list_time_blocks. Required with memo.",
+        },
+      },
+      required: ["block_id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "delete_time_block",
+    description:
+      "Permanently delete ONE recorded time block, along with any files attached " +
+      "to it. This cannot be undone — there is no trash and no restore. Before " +
+      "calling it you MUST show the user the block you are about to delete (date, " +
+      "start and end time, project, task and memo, from list_time_blocks) and get " +
+      "an explicit yes for that specific block. Never infer the block from a vague " +
+      "instruction, and never delete several blocks because the user described a " +
+      "range — confirm and delete them one at a time. Requires the blocks:delete " +
+      "scope, which is separate from blocks:write and has to be granted deliberately.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        block_id: {
+          type: "number",
+          description: "From list_time_blocks. Exactly one block is deleted.",
+        },
+      },
+      required: ["block_id"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 // ── Tool implementations ─────────────────────────────────────────────────────
@@ -425,6 +476,65 @@ async function dispatch(name: string, args: Args) {
       });
     }
 
+    case "update_time_block": {
+      const blockId = Number(args.block_id);
+      if (!Number.isFinite(blockId)) throw new Error("block_id is required");
+      const patch: Record<string, unknown> = {};
+      if (args.date != null) {
+        const date = String(args.date);
+        if (!isDate(date)) throw new Error("date must be YYYY-MM-DD");
+        patch.date = date;
+      }
+      if (args.start != null) patch.start_min = toMinutes(args.start as string | number, "start");
+      if (args.end != null) patch.end_min = toMinutes(args.end as string | number, "end");
+      if (patch.start_min != null && patch.end_min != null
+          && !((patch.start_min as number) < (patch.end_min as number))) {
+        throw new Error("start must be before end");
+      }
+      if (args.memo != null) patch.memo = String(args.memo);
+      if (args.task_id != null) patch.task_id = Number(args.task_id);
+      if (args.project_id != null) patch.project_id = Number(args.project_id);
+      if (Object.keys(patch).length === 0) {
+        throw new Error("nothing to change — pass at least one of date, start, end, memo, task_id");
+      }
+
+      const block = await tm.updateBlock(blockId, patch);
+      const [projRows, taskRows] = await Promise.all([projects(), tasks()]);
+      return ok({
+        updated: true,
+        id: block.id,
+        date: block.date,
+        start: hhmm(block.start_min),
+        end: hhmm(block.end_min),
+        hours: Number(hours(block.end_min - block.start_min)),
+        project: nameOf(projRows, block.project_id),
+        task: block.task_id != null ? nameOf(taskRows, block.task_id) : null,
+        task_id: block.task_id,
+        memo: block.memo,
+      }, await encryptionNote(projRows));
+    }
+
+    case "delete_time_block": {
+      const blockId = Number(args.block_id);
+      if (!Number.isFinite(blockId)) throw new Error("block_id is required");
+      const [projRows, taskRows] = await Promise.all([projects(), tasks()]);
+      // The API returns the row it removed, so the reply can name exactly
+      // what is gone rather than a bare acknowledgement.
+      const gone = await tm.deleteBlock(blockId);
+      return ok({
+        deleted: true,
+        permanent: "This block and its attachments are gone; there is no undo.",
+        id: gone.id,
+        date: gone.date,
+        start: hhmm(gone.start_min),
+        end: hhmm(gone.end_min),
+        hours: Number(hours(gone.end_min - gone.start_min)),
+        project: nameOf(projRows, gone.project_id),
+        task: gone.task_id != null ? nameOf(taskRows, gone.task_id) : null,
+        memo: gone.memo,
+      }, await encryptionNote(projRows));
+    }
+
     default:
       throw new Error(`unknown tool: ${name}`);
   }
@@ -433,7 +543,7 @@ async function dispatch(name: string, args: Args) {
 // ── Wire up ──────────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: "pyunto-tm", version: "0.1.0" },
+  { name: "pyunto-tm", version: "0.2.0" },
   { capabilities: { tools: {} } },
 );
 

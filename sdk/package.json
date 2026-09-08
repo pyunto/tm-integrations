@@ -1,6 +1,6 @@
 {
   "name": "@pyunto/tm-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "TypeScript SDK for the Pyunto Time Management public REST API (v1) with client-side E2EE decryption.",
   "license": "MIT",
   "type": "module",

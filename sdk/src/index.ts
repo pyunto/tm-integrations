@@ -78,6 +78,17 @@ export interface LogWorkInput {
   task_id?: number;
 }
 
+export interface UpdateBlockInput {
+  date?: string;       // YYYY-MM-DD
+  start_min?: number;
+  end_min?: number;
+  memo?: string;       // needs project_id; encrypted locally for E2EE projects
+  task_id?: number;    // <= 0 detaches the block from its task
+  /** Which project's key to encrypt `memo` under. Required only when
+   *  setting a memo; it does not move the block between projects. */
+  project_id?: number;
+}
+
 export class PyuntoTMError extends Error {
   constructor(readonly status: number, message: string) {
     super(message);
@@ -200,6 +211,37 @@ export class PyuntoTM {
       return this.req("POST", "/blocks", { ...rest, memo_enc });
     }
     return this.req("POST", "/blocks", { ...rest, memo: memo ?? "" });
+  }
+
+  /** Change an existing block. Only the fields you pass are touched.
+   *
+   *  Setting `memo` also needs `project_id` — a memo is encrypted under
+   *  the project's own key, and the API has no endpoint that reveals which
+   *  project a block id belongs to, so the caller (who got the block from
+   *  blocks()) has to say. It selects the key; it does not move the block. */
+  async updateBlock(id: number, patch: UpdateBlockInput): Promise<V1Block> {
+    const { memo, project_id, ...rest } = patch;
+    if (memo === undefined) return this.req("PATCH", `/blocks/${id}`, rest);
+    if (project_id == null) {
+      throw new Error("updating a memo requires project_id, to know which key to encrypt under");
+    }
+    const proj = (await this.projectMap()).get(project_id);
+    if (proj && proj.encryption_version >= 1) {
+      const dek = await this.dekFor(proj);
+      if (!dek) {
+        throw new Error(
+          "E2EE project — call unlock(password) first (and mint the API key with keys:read)");
+      }
+      return this.req("PATCH", `/blocks/${id}`, { ...rest, memo_enc: await encryptField(dek, memo) });
+    }
+    return this.req("PATCH", `/blocks/${id}`, { ...rest, memo });
+  }
+
+  /** Delete one block. Irreversible — the row and its attachments are
+   *  removed outright. Returns what was deleted so the caller can report
+   *  it. There is no bulk form on purpose. */
+  deleteBlock(id: number): Promise<V1Block> {
+    return this.req("DELETE", `/blocks/${id}`);
   }
 
   // ── E2EE ───────────────────────────────────────────────────────────────────

@@ -71,7 +71,8 @@ check("lists its tools", () => {
   assert.ok(r, "no reply to tools/list");
   const names = r.result.tools.map((t) => t.name);
   for (const expected of ["whoami", "list_projects", "list_tasks",
-                          "list_time_blocks", "time_summary", "log_time"]) {
+                          "list_time_blocks", "time_summary", "log_time",
+                          "update_time_block", "delete_time_block"]) {
     assert.ok(names.includes(expected), `missing tool: ${expected}`);
   }
 });
@@ -87,7 +88,11 @@ check("still starts", () => assert.match(linked.err, /pyunto-tm MCP server ready
 check("still answers", () => {
   const r = replies(linked.out).find((x) => x.id === 2);
   assert.ok(r, "no reply to tools/list through the symlink");
-  assert.equal(r.result.tools.length, 6);
+  // Same tool set as the direct launch — pinned by name, not by a count
+  // that every new tool would break.
+  assert.deepEqual(
+    r.result.tools.map((t) => t.name).sort(),
+    replies(direct.out).find((x) => x.id === 2).result.tools.map((t) => t.name).sort());
 });
 
 // 3. Misconfiguration is reported, not silent.

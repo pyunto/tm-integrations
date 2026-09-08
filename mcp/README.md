@@ -19,6 +19,8 @@ assistant can read the schedule, summarise where the hours went, and log time.
 | `list_time_blocks` (range ≤ 92 days) | `blocks:read` |
 | `time_summary` (grouped by project / task / date) | `record:read` |
 | `log_time` (**writes**) | `blocks:write` |
+| `update_time_block` (**writes**) | `blocks:write` |
+| `delete_time_block` — one id, permanent, takes attachments with it | `blocks:delete` |
 
 Every tool returns JSON as text. Failures come back as `isError` results whose
 message names the fix (missing scope, wrong key, locked E2EE) rather than
@@ -42,7 +44,8 @@ npm run build                 # both packages
 npm test                      # sdk crypto round-trips + 25 MCP tool checks
 ```
 
-Result: `mcp/dist/index.js`, an executable stdio server.
+Result: `mcp/dist/cli.js`, the executable stdio server (`dist/index.js`
+stays a side-effect-free module the tests can import).
 
 ## Configuration
 
@@ -84,9 +87,16 @@ names.
 ## Layout
 
 ```
-src/index.ts     tool definitions + implementations + stdio wiring
+src/index.ts     tool definitions + implementations + server wiring
+src/cli.ts       the bin: calls start()
 test/tools.mjs   stub /api/v1 server, exercises every tool and error path
+test/cli.mjs     spawns the built bin (directly and via symlink) over real MCP
 ```
 
-`callTool(name, args)` is exported for tests; the stdio transport only starts
-when the file is executed directly.
+`callTool(name, args)` is exported for tests; `start()` attaches the transport
+and is called only by `cli.ts`.
+
+`delete_time_block` is deliberately single-id: no range or filter delete is
+exposed, because an automated caller getting a range wrong destroys an unbounded
+amount of data that has no restore path. Its tool description requires the model
+to show the user the exact block first and get a yes for that block.
