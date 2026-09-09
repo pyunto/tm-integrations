@@ -104,4 +104,24 @@ check("says which variable to set", () =>
   assert.match(noKey.err, /PYUNTO_TM_API_KEY is not set/));
 check("keeps stdout clean for the protocol", () => assert.equal(noKey.out, ""));
 
+// 4. A bad password-file path is a misconfiguration, not a crash.
+//    Letting readFileSync throw during module load killed the process
+//    before the transport existed, and the client could only report
+//    "CONNECTION_CLOSED" — which points at everything except the typo.
+console.log("unreadable password file");
+const badFile = await run(CLI, {
+  PYUNTO_TM_API_KEY: "ptm_test",
+  PYUNTO_TM_PASSWORD_FILE: "/nonexistent/pyunto-password",
+}, HANDSHAKE);
+check("still starts and serves", () => {
+  assert.match(badFile.err, /pyunto-tm MCP server ready/);
+  const r = replies(badFile.out).find((x) => x.id === 2);
+  assert.ok(r, "no reply to tools/list with a bad password file");
+  assert.ok(r.result.tools.length > 0);
+});
+check("says on stderr what could not be read", () => {
+  assert.match(badFile.err, /PYUNTO_TM_PASSWORD_FILE/);
+  assert.match(badFile.err, /continuing without decryption/);
+});
+
 console.log(`\n${n} checks passed`);

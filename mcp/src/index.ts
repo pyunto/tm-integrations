@@ -38,9 +38,30 @@ const API_KEY = process.env.PYUNTO_TM_API_KEY ?? "";
 const BASE_URL = process.env.PYUNTO_TM_BASE_URL ?? "https://tm.pyunto.com";
 // A password may also be handed over via a file path, which keeps it out
 // of the client's config JSON and out of `ps` output.
+//
+// A missing or unreadable file must not take the server down with it.
+// Letting readFileSync throw here killed the process during module load,
+// and an MCP client has no way to show that — it just reports
+// "CONNECTION_CLOSED", pointing at everything except the typo in a path.
+// Carry the reason instead and serve without decryption: every
+// schedule-shaped tool still works, and whoami explains what happened.
+let passwordFileError: string | null = null;
+
+function readPasswordFile(path: string): string {
+  try {
+    return readFileSync(path, "utf8").trim();
+  } catch (e) {
+    passwordFileError =
+      `could not read PYUNTO_TM_PASSWORD_FILE (${path}): ` +
+      `${e instanceof Error ? e.message : String(e)}`;
+    console.error(`pyunto-tm: ${passwordFileError} — continuing without decryption.`);
+    return "";
+  }
+}
+
 const PASSWORD = process.env.PYUNTO_TM_PASSWORD
   ?? (process.env.PYUNTO_TM_PASSWORD_FILE
-    ? readFileSync(process.env.PYUNTO_TM_PASSWORD_FILE, "utf8").trim()
+    ? readPasswordFile(process.env.PYUNTO_TM_PASSWORD_FILE)
     : "");
 
 const tm = new PyuntoTM({ apiKey: API_KEY, baseUrl: BASE_URL });
@@ -94,6 +115,10 @@ async function encryptionNote(rows: { encryption_version?: number }[]): Promise<
   if (await ensureUnlocked()) return null;
   const anyE2EE = rows.some((r) => (r.encryption_version ?? 0) >= 1);
   if (!anyE2EE) return null;
+  if (passwordFileError) {
+    return `Names are empty because the password file could not be read: ${passwordFileError}. ` +
+      "Fix the path, or drop PYUNTO_TM_PASSWORD_FILE and set PYUNTO_TM_PASSWORD instead.";
+  }
   if (unlockError) {
     return `Names are empty because unlocking failed: ${unlockError}. ` +
       "Check PYUNTO_TM_PASSWORD and that the API key has the keys:read scope.";
@@ -353,9 +378,11 @@ async function dispatch(name: string, args: Args) {
         server: BASE_URL,
         e2ee_decryption: unlocked
           ? "enabled — encrypted names and memos are readable"
-          : PASSWORD
-            ? `unavailable — unlock failed: ${unlockError ?? "unknown error"}`
-            : "disabled — no PYUNTO_TM_PASSWORD set; ids/dates/durations still work",
+          : passwordFileError
+            ? `unavailable — ${passwordFileError}`
+            : PASSWORD
+              ? `unavailable — unlock failed: ${unlockError ?? "unknown error"}`
+              : "disabled — no PYUNTO_TM_PASSWORD set; ids/dates/durations still work",
       });
     }
 
@@ -616,7 +643,7 @@ async function dispatch(name: string, args: Args) {
 // ── Wire up ──────────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: "pyunto-tm", version: "0.3.0" },
+  { name: "pyunto-tm", version: "0.3.1" },
   { capabilities: { tools: {} } },
 );
 
