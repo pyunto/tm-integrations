@@ -304,8 +304,20 @@ check("tells the model to confirm the specific block first", () => {
   const del = TOOLS.find((t) => t.name === "delete_time_block");
   assert.match(del.description, /MUST show the user/);
   assert.match(del.description, /one at a time/);
-  assert.match(del.description, /cannot be undone/);
+});
+check("describes deletion as reversible for 14 days, without contradicting itself", () => {
+  // This assertion used to require "cannot be undone" — a leftover from
+  // before soft delete, which then sat in the same paragraph as "can be
+  // put back for 14 days". A model reading the first half warns the user
+  // that nothing can be recovered, which is false.
+  const del = TOOLS.find((t) => t.name === "delete_time_block");
   assert.match(del.description, /14 days/);
+  assert.match(del.description, /restore_time_block/);
+  for (const contradiction of [/cannot be undone/, /no restore/, /no trash/,
+                                /irreversible(?!\.)/]) {
+    assert.doesNotMatch(del.description.replace(
+      "do not tell the user the deletion is irreversible", ""), contradiction);
+  }
 });
 
 console.log("restore");

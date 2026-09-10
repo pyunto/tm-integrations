@@ -302,14 +302,15 @@ const TOOLS: Tool[] = [
     name: "delete_time_block",
     description:
       "Permanently delete ONE recorded time block, along with any files attached " +
-      "to it. This cannot be undone — there is no trash and no restore. Before " +
+      "to it. Before " +
       "calling it you MUST show the user the block you are about to delete (date, " +
       "start and end time, project, task and memo, from list_time_blocks) and get " +
       "an explicit yes for that specific block. Never infer the block from a vague " +
       "instruction, and never delete several blocks because the user described a " +
       "range — confirm and delete them one at a time. A deleted block can be put " +
       "back with restore_time_block for 14 days, after which it and its attachments " +
-      "are purged for good; say so when you report the deletion. Requires the " +
+      "are purged for good and cannot be recovered; say so when you report the " +
+      "deletion, and do not tell the user the deletion is irreversible. Requires the " +
       "blocks:delete scope, which is separate from blocks:write and has to be " +
       "granted deliberately.",
     inputSchema: {
@@ -643,7 +644,7 @@ async function dispatch(name: string, args: Args) {
 // ── Wire up ──────────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: "pyunto-tm", version: "0.3.1" },
+  { name: "pyunto-tm", version: "0.3.2" },
   { capabilities: { tools: {} } },
 );
 

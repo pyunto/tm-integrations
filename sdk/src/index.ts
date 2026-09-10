@@ -213,9 +213,27 @@ export class PyuntoTM {
           "E2EE project — call unlock(password) first (and mint the API key with keys:read)");
       }
       const memo_enc = await encryptField(dek, memo ?? "");
-      return this.req("POST", "/blocks", { ...rest, memo_enc });
+      return this.withMemo(await this.req<V1Block>("POST", "/blocks", { ...rest, memo_enc }));
     }
     return this.req("POST", "/blocks", { ...rest, memo: memo ?? "" });
+  }
+
+  /** Fill in a block's plaintext memo when we hold the key.
+   *
+   *  Write endpoints echo the row they touched, and for an E2EE project
+   *  the server can only echo ciphertext — `memo` comes back "". Returning
+   *  that verbatim reads as "the memo was wiped", which is exactly the
+   *  wrong thing to tell someone who just edited a block. Reads take an
+   *  explicit { decrypt: true }; a write has no options object to put it
+   *  in, so this runs whenever the client is unlocked and is a no-op
+   *  otherwise. */
+  private async withMemo<T extends V1Block>(block: T): Promise<T> {
+    if (!this.privateKey || !block.memo_enc || block.memo) return block;
+    const proj = (await this.projectMap()).get(block.project_id);
+    if (!proj || proj.encryption_version < 1) return block;
+    const dek = await this.dekFor(proj);
+    if (dek) block.memo = await decryptField(dek, block.memo_enc);
+    return block;
   }
 
   /** Change an existing block. Only the fields you pass are touched.
@@ -226,7 +244,9 @@ export class PyuntoTM {
    *  blocks()) has to say. It selects the key; it does not move the block. */
   async updateBlock(id: number, patch: UpdateBlockInput): Promise<V1Block> {
     const { memo, project_id, ...rest } = patch;
-    if (memo === undefined) return this.req("PATCH", `/blocks/${id}`, rest);
+    if (memo === undefined) {
+      return this.withMemo(await this.req<V1Block>("PATCH", `/blocks/${id}`, rest));
+    }
     if (project_id == null) {
       throw new Error("updating a memo requires project_id, to know which key to encrypt under");
     }
@@ -237,7 +257,8 @@ export class PyuntoTM {
         throw new Error(
           "E2EE project — call unlock(password) first (and mint the API key with keys:read)");
       }
-      return this.req("PATCH", `/blocks/${id}`, { ...rest, memo_enc: await encryptField(dek, memo) });
+      return this.withMemo(await this.req<V1Block>(
+        "PATCH", `/blocks/${id}`, { ...rest, memo_enc: await encryptField(dek, memo) }));
     }
     return this.req("PATCH", `/blocks/${id}`, { ...rest, memo });
   }
@@ -246,8 +267,8 @@ export class PyuntoTM {
    *  retention window closes (14 days), after which the row and its
    *  attachments are purged for good. Returns what was deleted so the
    *  caller can report it. There is no bulk form on purpose. */
-  deleteBlock(id: number): Promise<V1Block> {
-    return this.req("DELETE", `/blocks/${id}`);
+  async deleteBlock(id: number): Promise<V1Block> {
+    return this.withMemo(await this.req<V1Block>("DELETE", `/blocks/${id}`));
   }
 
   /** Blocks deleted but still restorable, newest first. */
@@ -267,8 +288,8 @@ export class PyuntoTM {
   }
 
   /** Put a deleted block back. A no-op on a block that is not deleted. */
-  restoreBlock(id: number): Promise<V1Block> {
-    return this.req("POST", `/blocks/${id}/restore`);
+  async restoreBlock(id: number): Promise<V1Block> {
+    return this.withMemo(await this.req<V1Block>("POST", `/blocks/${id}/restore`));
   }
 
   // ── E2EE ───────────────────────────────────────────────────────────────────

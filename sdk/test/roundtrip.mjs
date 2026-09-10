@@ -90,3 +90,73 @@ if (failures) {
   process.exit(1);
 }
 console.log("\nall checks passed");
+
+// 8) Write endpoints return a readable memo on an E2EE project.
+//    Regression: updateBlock/deleteBlock/restoreBlock echoed the server's
+//    response verbatim, and for an E2EE project the server can only send
+//    ciphertext — so `memo` came back "" after a successful edit, which
+//    reads as "your memo was wiped". Reads take { decrypt: true }; a write
+//    has no options object, so decryption has to be automatic there.
+{
+  const { PyuntoTM } = await import("../dist/index.js");
+  const b64 = (b) => sodium.to_base64(b, sodium.base64_variants.ORIGINAL);
+
+  const salt = sodium.randombytes_buf(sodium.crypto_pwhash_SALTBYTES);
+  const kek = sodium.crypto_pwhash(
+    32, password, salt,
+    sodium.crypto_pwhash_OPSLIMIT_INTERACTIVE,
+    sodium.crypto_pwhash_MEMLIMIT_INTERACTIVE,
+    sodium.crypto_pwhash_ALG_ARGON2ID13,
+  );
+  const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
+  const wrapped = new Uint8Array([
+    ...salt, ...nonce, ...sodium.crypto_secretbox_easy(kp.privateKey, nonce, kek),
+  ]);
+
+  const MEMO = "設計レビュー 🌸";
+  const memoEnc = await encryptField(dek, MEMO);
+  const sealedDek = sodium.crypto_box_seal(dek, kp.publicKey);
+
+  // A block exactly as the server sends it for an E2EE project: the
+  // plaintext column is empty, the ciphertext carries the content.
+  const serverBlock = {
+    id: 596, project_id: 1, task_id: null, date: "2026-09-09",
+    start_min: 540, end_min: 600, memo: "", memo_enc: memoEnc, created_by: 1,
+  };
+
+  const stub = async (url, init) => {
+    const path = String(url).replace("http://stub/api/v1", "");
+    const body =
+      path === "/keys" ? {
+        encryption_version: 1,
+        public_key: b64(kp.publicKey),
+        encrypted_private_key: b64(wrapped),
+      }
+      : path === "/projects" ? [{
+        id: 1, name: "", name_enc: null, color: "#f00", role: "owner",
+        is_shared: false, encryption_version: 1, dek_sealed: b64(sealedDek),
+      }]
+      : { ...serverBlock };   // PATCH / DELETE / POST-restore all echo the row
+                              // (a fresh copy: withMemo fills memo in place)
+    return { ok: true, status: 200, json: async () => body };
+  };
+
+  const tm = new PyuntoTM({ apiKey: "ptm_test", baseUrl: "http://stub", fetch: stub });
+  await tm.unlock(password);
+
+  const patched = await tm.updateBlock(596, { start_min: 600 });
+  check("updateBlock returns the decrypted memo", patched.memo === MEMO);
+
+  const removed = await tm.deleteBlock(596);
+  check("deleteBlock returns the decrypted memo", removed.memo === MEMO);
+
+  const back = await tm.restoreBlock(596);
+  check("restoreBlock returns the decrypted memo", back.memo === MEMO);
+
+  // A locked client must not invent a memo it cannot read.
+  const locked = new PyuntoTM({ apiKey: "ptm_test", baseUrl: "http://stub", fetch: stub });
+  const raw = await locked.deleteBlock(596);
+  check("a locked client leaves the memo empty rather than guessing", raw.memo === "");
+}
+
+process.exit(failures === 0 ? 0 : 1);
