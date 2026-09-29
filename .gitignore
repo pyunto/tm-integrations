@@ -2,3 +2,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 .DS_Store
+
+# 認証情報・鍵（誤コミット防止）
+.env
+.env.*
+*.pem
+*.key
