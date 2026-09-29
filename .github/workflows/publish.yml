@@ -89,5 +89,24 @@ jobs:
       - name: Validate server.json
         run: ./mcp-publisher validate
 
+      # npm は publish 直後すぐにはバージョンを公開レジストリに出さない（実測で最大2分）。
+      # MCPレジストリは「そのnpmバージョンが実在するか」を検証するため、
+      # 待たずに進めると 400 "version '...' was not found" で失敗する。
+      - name: Wait until npm surfaces the new version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          for i in $(seq 1 30); do
+            if curl -fsS -H 'Cache-Control: no-cache' \
+                 "https://registry.npmjs.org/@pyunto%2Ftm-mcp?t=$(date +%s)" \
+               | jq -e --arg v "${VERSION}" '.versions[$v] != null' > /dev/null; then
+              echo "npm now serves ${VERSION} (attempt ${i})"
+              exit 0
+            fi
+            echo "npm does not serve ${VERSION} yet (attempt ${i}/30); sleeping 10s"
+            sleep 10
+          done
+          echo "::error::npm did not surface ${VERSION} within 5 minutes"
+          exit 1
+
       - name: Publish to the MCP Registry
         run: ./mcp-publisher publish
