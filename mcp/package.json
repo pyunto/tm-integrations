@@ -1,7 +1,7 @@
 {
   "name": "@pyunto/tm-mcp",
-  "version": "0.3.4",
-  "mcpName": "io.github.pyunto/tm-mcp",
+  "version": "0.3.5",
+  "mcpName": "com.pyunto/time-management",
   "description": "Model Context Protocol server for Pyunto Time Management — lets Claude Code, Codex and other MCP clients read and log time.",
   "license": "MIT",
   "type": "module",

@@ -1,12 +1,15 @@
 name: Publish to npm and the MCP Registry
 
-# v0.3.4 のようなバージョンタグを push すると、
+# v0.3.5 のようなバージョンタグを push すると、
 # テスト → ビルド → npm公開 → MCPレジストリ公開 まで一気に走る。
 #
-# 認証情報は一切保存していない:
-#   - npm        : Trusted Publishing (OIDC)。npm側で信頼するpublisherを一度登録しておく
-#   - MCPレジストリ: mcp-publisher login github-oidc
-# どちらも GitHub Actions の OIDC トークンで認証するため、シークレット登録は不要。
+# 認証の内訳:
+#   - npm        : Trusted Publishing (OIDC)。認証情報の保存は不要。
+#                  npm側でパッケージ設定に信頼するpublisherを一度登録しておく。
+#   - MCPレジストリ: pyunto.com のドメイン所有証明（HTTP方式）。
+#                  登録名が com.pyunto/* のため GitHub OIDC は使えない
+#                  （OIDCが与えるのは io.github.* のみ）。
+#                  秘密鍵を GitHub Secrets の PYUNTO_MCP_REGISTRY_KEY に登録しておく。
 
 on:
   push:
@@ -16,7 +19,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write # npm Trusted Publishing と MCPレジストリOIDCの両方に必要
+      id-token: write # npm Trusted Publishing に必要
       contents: read
 
     steps:
@@ -83,8 +86,15 @@ jobs:
           chmod +x mcp-publisher
           ./mcp-publisher --version
 
-      - name: Authenticate to the MCP Registry (OIDC)
-        run: ./mcp-publisher login github-oidc
+      # レジストリの名前空間が com.pyunto/* になったため、GitHub OIDC は使えない
+      # （OIDCが与えるのは io.github.* のみ）。pyunto.com のドメイン所有証明
+      # （https://pyunto.com/.well-known/mcp-registry-auth）に対応する秘密鍵で認証する。
+      # 鍵は GitHub Secrets の PYUNTO_MCP_REGISTRY_KEY に入っている。
+      # コマンドラインに直接展開せず env 経由で渡す。
+      - name: Authenticate to the MCP Registry (domain ownership)
+        env:
+          MCP_REGISTRY_KEY: ${{ secrets.PYUNTO_MCP_REGISTRY_KEY }}
+        run: ./mcp-publisher login http --domain pyunto.com --private-key "${MCP_REGISTRY_KEY}"
 
       - name: Validate server.json
         run: ./mcp-publisher validate
