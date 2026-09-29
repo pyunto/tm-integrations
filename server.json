@@ -1,0 +1,50 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.pyunto/tm-mcp",
+  "description": "Read your Pyunto Time Management schedule and log time from an AI assistant. E2EE project planning.",
+  "websiteUrl": "https://tm.pyunto.com/docs/mcp.en.md",
+  "repository": {
+    "url": "https://github.com/pyunto/tm-integrations",
+    "source": "github",
+    "subfolder": "mcp"
+  },
+  "version": "0.3.3",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@pyunto/tm-mcp",
+      "version": "0.3.3",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "PYUNTO_TM_API_KEY",
+          "description": "API key (ptm_...) minted in Settings → Account → API keys",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "PYUNTO_TM_BASE_URL",
+          "description": "Base URL, for self-hosted instances",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "https://tm.pyunto.com"
+        },
+        {
+          "name": "PYUNTO_TM_PASSWORD",
+          "description": "Account password; unwraps the private key locally so E2EE project and task names decrypt",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "PYUNTO_TM_PASSWORD_FILE",
+          "description": "Path to a file holding the account password, instead of PYUNTO_TM_PASSWORD",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
