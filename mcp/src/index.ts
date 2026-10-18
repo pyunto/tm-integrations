@@ -64,6 +64,11 @@ const PASSWORD = process.env.PYUNTO_TM_PASSWORD
     ? readPasswordFile(process.env.PYUNTO_TM_PASSWORD_FILE)
     : "");
 
+const MISSING_KEY_HELP =
+  "PYUNTO_TM_API_KEY is not set. Create a key in Pyunto Time Management under "
+  + "Settings → Account → API keys, then set it in your MCP client config. "
+  + "Listing the tools needs no key; reading or writing data does.";
+
 const tm = new PyuntoTM({ apiKey: API_KEY, baseUrl: BASE_URL });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -361,6 +366,10 @@ type Args = Record<string, unknown>;
  *  which is far more useful to an agent than a transport-level error. */
 async function callTool(name: string, args: Args = {}) {
   try {
+    // Every tool but whoami needs the key to do anything; answer with the
+    // fix rather than letting each one fail as an opaque 401. whoami is
+    // the diagnostic, so it runs and reports the missing key itself.
+    if (!API_KEY && name !== "whoami") return fail(new Error(MISSING_KEY_HELP));
     return await dispatch(name, args);
   } catch (e) {
     return fail(e);
@@ -370,6 +379,14 @@ async function callTool(name: string, args: Args = {}) {
 async function dispatch(name: string, args: Args) {
   switch (name) {
     case "whoami": {
+      if (!API_KEY) {
+        return ok({
+          configured: false,
+          server: BASE_URL,
+          problem: MISSING_KEY_HELP,
+          tools_listed_without_a_key: true,
+        });
+      }
       const me = await tm.me();
       const unlocked = await ensureUnlocked();
       return ok({
@@ -644,7 +661,7 @@ async function dispatch(name: string, args: Args) {
 // ── Wire up ──────────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: "pyunto-tm", version: "0.3.2" },
+  { name: "pyunto-tm", version: "0.3.6" },
   { capabilities: { tools: {} } },
 );
 
@@ -657,14 +674,18 @@ server.setRequestHandler(CallToolRequestSchema, async (req) =>
  *  importing this module (the tests do) never touches stdio. */
 export function start(): void {
   if (!API_KEY) {
+    // Not fatal. A client that cannot be told why a server died reports
+    // only "CONNECTION_CLOSED", which points at everything except the
+    // missing variable — the same failure the password file used to have.
+    // Serve anyway: tools/list needs no credentials, and every tool call
+    // answers with MISSING_KEY_HELP, which the client can actually show.
     // stderr, never stdout — stdout carries the JSON-RPC frames.
-    console.error(
-      "PYUNTO_TM_API_KEY is not set. Create a key in Pyunto Time Management " +
-      "under Settings → Account → API keys, then set it in your MCP client config.");
-    process.exit(1);
+    console.error(`pyunto-tm: ${MISSING_KEY_HELP}`);
   }
   server.connect(new StdioServerTransport())
-    .then(() => console.error(`pyunto-tm MCP server ready (${BASE_URL})`))
+    .then(() => console.error(
+      `pyunto-tm MCP server ready (${BASE_URL})`
+      + (API_KEY ? "" : " — no API key configured; tools will report that")))
     .catch((e) => {
       console.error("fatal:", e);
       process.exit(1);

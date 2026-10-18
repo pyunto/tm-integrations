@@ -8,20 +8,20 @@
     "source": "github",
     "subfolder": "mcp"
   },
-  "version": "0.3.5",
+  "version": "0.3.6",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@pyunto/tm-mcp",
-      "version": "0.3.5",
+      "version": "0.3.6",
       "transport": {
         "type": "stdio"
       },
       "environmentVariables": [
         {
           "name": "PYUNTO_TM_API_KEY",
-          "description": "API key (ptm_...) minted in Settings → Account → API keys",
+          "description": "API key (ptm_...) minted in Settings → Account → API keys. Required to read or write data; listing the tools works without it.",
           "isRequired": true,
           "isSecret": true
         },

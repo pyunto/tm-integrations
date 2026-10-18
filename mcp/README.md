@@ -52,9 +52,14 @@ stays a side-effect-free module the tests can import).
 Environment only — MCP clients spawn the process and inject env from their
 config file.
 
+The server starts without an API key and answers `tools/list` — a client or
+a directory can see what it offers before anyone signs up. Calling a tool
+without one returns the same guidance as an `isError` rather than an opaque
+401, and `whoami` reports the missing key instead of failing.
+
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
-| `PYUNTO_TM_API_KEY` | ✅ | — | `ptm_…`, minted in Settings → Account → API keys |
+| `PYUNTO_TM_API_KEY` | for data | — | `ptm_…`, minted in Settings → Account → API keys. Listing the tools works without it |
 | `PYUNTO_TM_BASE_URL` | | `https://tm.pyunto.com` | Self-hosted instances |
 | `PYUNTO_TM_PASSWORD` | | none | Unwraps the private key locally so E2EE names/memos decrypt |
 | `PYUNTO_TM_PASSWORD_FILE` | | none | Same, read from a file instead of the env |

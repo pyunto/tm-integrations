@@ -96,13 +96,42 @@ check("still answers", () => {
     replies(direct.out).find((x) => x.id === 2).result.tools.map((t) => t.name).sort());
 });
 
-// 3. Misconfiguration is reported, not silent.
+// 3. No API key is a misconfiguration, not a reason to refuse to start.
+//    Exiting here left the client reporting only "CONNECTION_CLOSED", and
+//    kept tools/list — which needs no credentials — unanswerable, so a
+//    directory or a prospective user could not see what the server does.
 console.log("missing API key");
-const noKey = await run(CLI, { PYUNTO_TM_API_KEY: "" }, []);
-check("exits non-zero", () => assert.notEqual(noKey.code, 0));
+const noKey = await run(CLI, { PYUNTO_TM_API_KEY: "" }, [
+  ...HANDSHAKE,
+  { jsonrpc: "2.0", id: 3, method: "tools/call",
+    params: { name: "whoami", arguments: {} } },
+  { jsonrpc: "2.0", id: 4, method: "tools/call",
+    params: { name: "list_projects", arguments: {} } },
+]);
+check("starts anyway", () => assert.match(noKey.err, /pyunto-tm MCP server ready/));
 check("says which variable to set", () =>
   assert.match(noKey.err, /PYUNTO_TM_API_KEY is not set/));
-check("keeps stdout clean for the protocol", () => assert.equal(noKey.out, ""));
+check("lists every tool without a key", () => {
+  const r = replies(noKey.out).find((x) => x.id === 2);
+  assert.ok(r, "no reply to tools/list without a key");
+  assert.equal(r.result.tools.length, 10);
+});
+check("whoami reports the missing key instead of failing", () => {
+  const r = replies(noKey.out).find((x) => x.id === 3);
+  assert.ok(r, "no reply to whoami");
+  const body = JSON.parse(r.result.content[0].text);
+  assert.equal(body.configured, false);
+  assert.match(body.problem, /PYUNTO_TM_API_KEY is not set/);
+});
+check("a data tool answers with the fix, not an opaque 401", () => {
+  const r = replies(noKey.out).find((x) => x.id === 4);
+  assert.ok(r, "no reply to list_projects");
+  assert.equal(r.result.isError, true);
+  assert.match(r.result.content[0].text, /PYUNTO_TM_API_KEY is not set/);
+});
+check("stdout stays pure JSON-RPC", () => {
+  for (const line of noKey.out.split("\n").filter(Boolean)) JSON.parse(line);
+});
 
 // 4. A bad password-file path is a misconfiguration, not a crash.
 //    Letting readFileSync throw during module load killed the process
