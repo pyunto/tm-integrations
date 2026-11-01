@@ -20,7 +20,12 @@ assistant can read the schedule, summarise where the hours went, and log time.
 | `time_summary` (grouped by project / task / date) | `record:read` |
 | `log_time` (**writes**) | `blocks:write` |
 | `update_time_block` (**writes**) | `blocks:write` |
-| `delete_time_block` — one id, permanent, takes attachments with it | `blocks:delete` |
+| `delete_time_block` — one id, restorable for 14 days | `blocks:delete` |
+| `list_deleted_time_blocks` / `restore_time_block` | `blocks:read` / `blocks:write` |
+| `create_task` — a Gantt task with start and end dates | `tasks:write` |
+| `complete_task` — mark finished, or reopen | `tasks:write` |
+| `update_task` — rename, move dates, archive | `tasks:write` |
+| `set_monthly_target` — the budget the daily draft divides up | `tasks:write` |
 
 Every tool returns JSON as text. Failures come back as `isError` results whose
 message names the fix (missing scope, wrong key, locked E2EE) rather than
@@ -105,3 +110,16 @@ and is called only by `cli.ts`.
 exposed, because an automated caller getting a range wrong destroys an unbounded
 amount of data that has no restore path. Its tool description requires the model
 to show the user the exact block first and get a yes for that block.
+
+There is no `delete_task` for the same reason, and a sharper one: removing a
+task detaches every block that logged time against it (`tasks.id ON DELETE SET
+NULL`) and orphans its subtasks, with nothing to restore from. `update_task`
+offers `archive` instead — the task leaves every view and can be brought back.
+
+`tasks:write` is separate from `blocks:write` on purpose. Recording time against
+a plan and rewriting the plan are different powers; a key given to something that
+only logs work should not be able to move deadlines.
+
+`update_task` returns an array. Moving a task's dates drags its dependents along,
+and the caller is told what else moved rather than discovering it on the next
+read.

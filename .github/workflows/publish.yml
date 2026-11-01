@@ -70,6 +70,27 @@ jobs:
       - name: Run tests
         run: npm test
 
+      # SDK を先に出す。tm-mcp は @pyunto/tm-sdk を依存に持つので、
+      # SDK が npm に無いバージョンのまま tm-mcp を公開すると、
+      # `npx -y @pyunto/tm-mcp` が ETARGET で落ちる。
+      # 0.3.6 までは SDK の版を上げていなかったため表面化しなかった。
+      #
+      # 同じ版が既に公開済みなら npm は 409 を返す。SDK だけ据え置きで
+      # MCP を出すリリースは正常なので、409 は握りつぶして先へ進む。
+      - name: Publish the SDK to npm (Trusted Publishing)
+        run: |
+          set +e
+          OUT="$(npm publish -w @pyunto/tm-sdk --access public 2>&1)"
+          CODE=$?
+          echo "${OUT}"
+          if [ ${CODE} -ne 0 ]; then
+            if echo "${OUT}" | grep -qiE 'cannot publish over|previously published|E409'; then
+              echo "SDK version already on npm — nothing to publish, continuing."
+            else
+              exit ${CODE}
+            fi
+          fi
+
       - name: Publish to npm (Trusted Publishing)
         run: npm publish -w @pyunto/tm-mcp --access public
 

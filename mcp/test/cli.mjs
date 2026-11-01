@@ -22,6 +22,17 @@ import { join, resolve } from "node:path";
 
 const CLI = resolve(import.meta.dirname, "../dist/cli.js");
 
+/** Every tool the server must offer. Listed here once so a new tool is
+ *  added in one place, and so the "no API key" case is checked against the
+ *  same set as the normal one — a directory reading tools/list without
+ *  credentials has to see all of them. */
+const EXPECTED_TOOLS = [
+  "whoami", "list_projects", "list_tasks", "list_time_blocks", "time_summary",
+  "log_time", "update_time_block", "delete_time_block",
+  "list_deleted_time_blocks", "restore_time_block",
+  "create_task", "complete_task", "update_task", "set_monthly_target",
+];
+
 /** Feed the server some JSON-RPC over stdin, collect stdout/stderr. */
 function run(entry, env, lines) {
   return new Promise((done) => {
@@ -70,10 +81,7 @@ check("lists its tools", () => {
   const r = replies(direct.out).find((x) => x.id === 2);
   assert.ok(r, "no reply to tools/list");
   const names = r.result.tools.map((t) => t.name);
-  for (const expected of ["whoami", "list_projects", "list_tasks",
-                          "list_time_blocks", "time_summary", "log_time",
-                          "update_time_block", "delete_time_block",
-                          "list_deleted_time_blocks", "restore_time_block"]) {
+  for (const expected of EXPECTED_TOOLS) {
     assert.ok(names.includes(expected), `missing tool: ${expected}`);
   }
 });
@@ -114,7 +122,12 @@ check("says which variable to set", () =>
 check("lists every tool without a key", () => {
   const r = replies(noKey.out).find((x) => x.id === 2);
   assert.ok(r, "no reply to tools/list without a key");
-  assert.equal(r.result.tools.length, 10);
+  // By name, not by a count every new tool would break — the point is
+  // that the full set is listed, not how big it happens to be.
+  const names = r.result.tools.map((t) => t.name);
+  for (const expected of EXPECTED_TOOLS) {
+    assert.ok(names.includes(expected), `missing tool without a key: ${expected}`);
+  }
 });
 check("whoami reports the missing key instead of failing", () => {
   const r = replies(noKey.out).find((x) => x.id === 3);

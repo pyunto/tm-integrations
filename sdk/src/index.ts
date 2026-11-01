@@ -83,6 +83,31 @@ export interface LogWorkInput {
   task_id?: number;
 }
 
+export interface CreateTaskInput {
+  project_id: number;
+  name: string;        // encrypted client-side for E2EE projects (requires unlock)
+  start_date: string;  // YYYY-MM-DD
+  end_date: string;    // YYYY-MM-DD, inclusive
+  parent_task_id?: number;
+}
+
+export interface UpdateTaskInput {
+  name?: string;       // needs project_id; encrypted locally for E2EE projects
+  start_date?: string;
+  end_date?: string;
+  completed?: boolean;
+  archived?: boolean;  // reversible; this is the API's stand-in for delete
+  /** Which project's key to encrypt `name` under. Required only when
+   *  setting a name; it does not move the task between projects. */
+  project_id?: number;
+}
+
+export interface V1Allocation {
+  task_id: number;
+  year_month: string;   // "2026-11"
+  target_minutes: number;
+}
+
 export interface UpdateBlockInput {
   date?: string;       // YYYY-MM-DD
   start_min?: number;
@@ -290,6 +315,76 @@ export class PyuntoTM {
   /** Put a deleted block back. A no-op on a block that is not deleted. */
   async restoreBlock(id: number): Promise<V1Block> {
     return this.withMemo(await this.req<V1Block>("POST", `/blocks/${id}/restore`));
+  }
+
+  // ── Tasks (write, scope tasks:write) ───────────────────────────────────────
+
+  /** Fill in a task's plaintext name when we hold the key — the write
+   *  counterpart of withMemo, and there for the same reason: an E2EE
+   *  project can only echo ciphertext, so `name` comes back "" and
+   *  returning that reads as "the name was wiped". */
+  private async withName<T extends V1Task>(task: T): Promise<T> {
+    if (!this.privateKey || !task.name_enc || task.name) return task;
+    const proj = (await this.projectMap()).get(task.project_id);
+    if (!proj || proj.encryption_version < 1) return task;
+    const dek = await this.dekFor(proj);
+    if (dek) task.name = await decryptField(dek, task.name_enc);
+    return task;
+  }
+
+  /** Add a task to the Gantt. For an E2EE project call unlock() first —
+   *  the name is encrypted locally and never sent in plaintext. */
+  async createTask(input: CreateTaskInput): Promise<V1Task> {
+    const { name, ...rest } = input;
+    const proj = (await this.projectMap()).get(input.project_id);
+    if (proj && proj.encryption_version >= 1) {
+      const dek = await this.dekFor(proj);
+      if (!dek) {
+        throw new Error(
+          "E2EE project — call unlock(password) first (and mint the API key with keys:read)");
+      }
+      const name_enc = await encryptField(dek, name);
+      return this.withName(await this.req<V1Task>("POST", "/tasks", { ...rest, name_enc }));
+    }
+    return this.req("POST", "/tasks", { ...rest, name });
+  }
+
+  /** Change a task. Only the fields you pass are touched.
+   *
+   *  Returns an ARRAY, not one task: moving the dates drags every
+   *  dependent task along with it, and the whole set comes back so the
+   *  caller sees what else moved instead of finding out on the next read.
+   */
+  async updateTask(id: number, patch: UpdateTaskInput): Promise<V1Task[]> {
+    const { name, project_id, ...rest } = patch;
+    if (name === undefined) {
+      return Promise.all((await this.req<V1Task[]>("PATCH", `/tasks/${id}`, rest))
+        .map((t) => this.withName(t)));
+    }
+    if (project_id === undefined) {
+      throw new Error("updateTask: setting `name` also needs `project_id` (it selects the key)");
+    }
+    const proj = (await this.projectMap()).get(project_id);
+    let body: Record<string, unknown>;
+    if (proj && proj.encryption_version >= 1) {
+      const dek = await this.dekFor(proj);
+      if (!dek) {
+        throw new Error(
+          "E2EE project — call unlock(password) first (and mint the API key with keys:read)");
+      }
+      body = { ...rest, name_enc: await encryptField(dek, name) };
+    } else {
+      body = { ...rest, name };
+    }
+    return Promise.all((await this.req<V1Task[]>("PATCH", `/tasks/${id}`, body))
+      .map((t) => this.withName(t)));
+  }
+
+  /** Set a task's monthly time budget. Without one the daily draft skips
+   *  the task entirely, which is the usual reason it produces nothing. */
+  setTaskAllocation(id: number, yearMonth: string, targetMinutes: number): Promise<V1Allocation> {
+    return this.req("PUT", `/tasks/${id}/allocation`,
+                    { year_month: yearMonth, target_minutes: targetMinutes });
   }
 
   // ── E2EE ───────────────────────────────────────────────────────────────────

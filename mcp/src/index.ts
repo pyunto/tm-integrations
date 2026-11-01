@@ -159,6 +159,19 @@ function nameOf(rows: { id: number; name: string }[], id: number | null | undefi
   return hit.name || `#${id}`;
 }
 
+/** PATCH /tasks returns the task plus everything a dependency dragged
+ *  along. Surfacing the others matters: a model that reports only the task
+ *  it touched leaves the user to discover on their next look that three
+ *  more tasks changed date. Empty array when nothing else moved. */
+function movedByDependency(rows: V1Task[], selfId: number) {
+  return rows
+    .filter((r) => r.id !== selfId)
+    .map((r) => ({
+      task_id: r.id, name: r.name || `#${r.id}`,
+      start_date: r.start_date, end_date: r.end_date,
+    }));
+}
+
 function ok(payload: unknown, note?: string | null) {
   const text = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
   return {
@@ -352,6 +365,96 @@ const TOOLS: Tool[] = [
         block_id: { type: "number", description: "From list_deleted_time_blocks." },
       },
       required: ["block_id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "create_task",
+    description:
+      "Add a task to the Gantt chart — a piece of work with a start and end date, " +
+      "which is what time blocks are later logged against. Use this for work that " +
+      "spans days or longer; for time already worked use log_time instead. Writes " +
+      "to the user's real plan, so confirm the project, name and dates with them " +
+      "first. Requires the tasks:write scope; an end-to-end-encrypted project also " +
+      "needs PYUNTO_TM_PASSWORD so the name can be encrypted locally.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project_id: { type: "number", description: "From list_projects." },
+        name: { type: "string", description: "What the task is. Encrypted client-side." },
+        start_date: { type: "string", description: "YYYY-MM-DD." },
+        end_date: { type: "string", description: "YYYY-MM-DD, inclusive. May be years out." },
+        parent_task_id: {
+          type: "number",
+          description: "Make this a subtask of that task, in the same project.",
+        },
+      },
+      required: ["project_id", "name", "start_date", "end_date"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "complete_task",
+    description:
+      "Mark a Gantt task finished, or reopen it. The task stays on the chart, " +
+      "drawn dimmed — nothing is deleted. This is how a finished piece of work " +
+      "shows up on the plan. Get task_id from list_tasks. Requires the " +
+      "tasks:write scope.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task_id: { type: "number", description: "From list_tasks." },
+        completed: {
+          type: "boolean",
+          description: "true marks it done (the default), false reopens it.",
+        },
+      },
+      required: ["task_id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "update_task",
+    description:
+      "Change a task's name, dates, or whether it is archived. Only the fields " +
+      "you pass change. Moving the dates also moves every task that depends on " +
+      "this one, and the reply lists everything that moved — tell the user about " +
+      "those too. Archiving hides a task from every view and is reversible; there " +
+      "is deliberately no way to delete a task through this server, because that " +
+      "would detach the time already logged against it. Requires the tasks:write " +
+      "scope; renaming an end-to-end-encrypted project's task also needs " +
+      "PYUNTO_TM_PASSWORD.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task_id: { type: "number", description: "From list_tasks." },
+        name: { type: "string", description: "Replaces the name." },
+        start_date: { type: "string", description: "YYYY-MM-DD." },
+        end_date: { type: "string", description: "YYYY-MM-DD, inclusive." },
+        archived: {
+          type: "boolean",
+          description: "true hides it from every view (reversible), false brings it back.",
+        },
+      },
+      required: ["task_id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "set_monthly_target",
+    description:
+      "Set how many hours a task should get in one calendar month. This is what " +
+      "the daily draft (the ✨ button) divides across the month's remaining " +
+      "workdays — a task with no target is skipped entirely, which is the usual " +
+      "reason the draft produces nothing. Requires the tasks:write scope.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task_id: { type: "number", description: "From list_tasks." },
+        year_month: { type: "string", description: 'Calendar month, "YYYY-MM".' },
+        hours: { type: "number", description: "Target hours for that month. 0 clears it." },
+      },
+      required: ["task_id", "year_month", "hours"],
       additionalProperties: false,
     },
   },
@@ -653,6 +756,129 @@ async function dispatch(name: string, args: Args) {
       }, await encryptionNote(projRows));
     }
 
+    case "create_task": {
+      const projectId = Number(args.project_id);
+      if (!Number.isFinite(projectId)) throw new Error("project_id is required");
+      const taskName = String(args.name ?? "").trim();
+      if (!taskName) throw new Error("name is required");
+      const startDate = String(args.start_date ?? "");
+      const endDate = String(args.end_date ?? "");
+      if (!isDate(startDate)) throw new Error("start_date must be YYYY-MM-DD");
+      if (!isDate(endDate)) throw new Error("end_date must be YYYY-MM-DD");
+      if (endDate < startDate) throw new Error("end_date must not be before start_date");
+
+      const projRows = await projects();
+      const proj = projRows.find((p) => p.id === projectId);
+      if (!proj) throw new Error(`no accessible project with id ${projectId} — call list_projects`);
+      if (proj.role === "viewer") throw new Error(`you only have viewer access to "${proj.name}"`);
+      if (proj.encryption_version >= 1 && !(await ensureUnlocked())) {
+        throw new Error(
+          `"${proj.name || `#${projectId}`}" is end-to-end encrypted, so a task name must be ` +
+          "encrypted locally before upload. Set PYUNTO_TM_PASSWORD (with a keys:read API key).");
+      }
+
+      const created = await tm.createTask({
+        project_id: projectId, name: taskName,
+        start_date: startDate, end_date: endDate,
+        parent_task_id: args.parent_task_id != null ? Number(args.parent_task_id) : undefined,
+      });
+      taskCache = null;   // a later list_tasks must see it
+      return ok({
+        created: true,
+        id: created.id,
+        name: created.name || taskName,
+        project: proj.name || `#${projectId}`,
+        start_date: created.start_date,
+        end_date: created.end_date,
+        parent_task_id: created.parent_task_id,
+        next: "set_monthly_target gives this task a budget, without which the daily draft skips it",
+      });
+    }
+
+    case "complete_task": {
+      const taskId = Number(args.task_id);
+      if (!Number.isFinite(taskId)) throw new Error("task_id is required");
+      const done = args.completed == null ? true : Boolean(args.completed);
+      const taskRows = await tasks();
+      const target = taskRows.find((x) => x.id === taskId);
+      if (!target) throw new Error(`no task with id ${taskId} — call list_tasks`);
+      const rows = await tm.updateTask(taskId, { completed: done });
+      taskCache = null;
+      return ok({
+        task_id: taskId,
+        name: target.name || `#${taskId}`,
+        completed: done,
+        also_moved: movedByDependency(rows, taskId),
+      });
+    }
+
+    case "update_task": {
+      const taskId = Number(args.task_id);
+      if (!Number.isFinite(taskId)) throw new Error("task_id is required");
+      const taskRows = await tasks();
+      const target = taskRows.find((x) => x.id === taskId);
+      if (!target) throw new Error(`no task with id ${taskId} — call list_tasks`);
+
+      const patch: Record<string, unknown> = {};
+      if (args.start_date != null) {
+        const d = String(args.start_date);
+        if (!isDate(d)) throw new Error("start_date must be YYYY-MM-DD");
+        patch.start_date = d;
+      }
+      if (args.end_date != null) {
+        const d = String(args.end_date);
+        if (!isDate(d)) throw new Error("end_date must be YYYY-MM-DD");
+        patch.end_date = d;
+      }
+      if (args.archived != null) patch.archived = Boolean(args.archived);
+      if (args.name != null) {
+        const projRows = await projects();
+        const proj = projRows.find((p) => p.id === target.project_id);
+        if (proj && proj.encryption_version >= 1 && !(await ensureUnlocked())) {
+          throw new Error(
+            `"${proj.name || `#${target.project_id}`}" is end-to-end encrypted, so a new task ` +
+            "name must be encrypted locally. Set PYUNTO_TM_PASSWORD (with a keys:read API key), " +
+            "or call update_task without `name`.");
+        }
+        patch.name = String(args.name);
+        // Selects the key to encrypt under; it does not move the task.
+        patch.project_id = target.project_id;
+      }
+      if (Object.keys(patch).length === 0) {
+        throw new Error("nothing to change — pass at least one of name, start_date, end_date, archived");
+      }
+
+      const rows = await tm.updateTask(taskId, patch);
+      taskCache = null;
+      const self = rows.find((x) => x.id === taskId);
+      return ok({
+        task_id: taskId,
+        name: self?.name || target.name || `#${taskId}`,
+        start_date: self?.start_date,
+        end_date: self?.end_date,
+        also_moved: movedByDependency(rows, taskId),
+      });
+    }
+
+    case "set_monthly_target": {
+      const taskId = Number(args.task_id);
+      if (!Number.isFinite(taskId)) throw new Error("task_id is required");
+      const yearMonth = String(args.year_month ?? "");
+      if (!/^\d{4}-\d{2}$/.test(yearMonth)) throw new Error('year_month must be "YYYY-MM"');
+      const h = Number(args.hours);
+      if (!Number.isFinite(h) || h < 0) throw new Error("hours must be a number >= 0");
+      const taskRows = await tasks();
+      const target = taskRows.find((x) => x.id === taskId);
+      if (!target) throw new Error(`no task with id ${taskId} — call list_tasks`);
+      const row = await tm.setTaskAllocation(taskId, yearMonth, Math.round(h * 60));
+      return ok({
+        task_id: taskId,
+        name: target.name || `#${taskId}`,
+        year_month: row.year_month,
+        hours: Number((row.target_minutes / 60).toFixed(2)),
+      });
+    }
+
     default:
       throw new Error(`unknown tool: ${name}`);
   }
@@ -661,7 +887,7 @@ async function dispatch(name: string, args: Args) {
 // ── Wire up ──────────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: "pyunto-tm", version: "0.3.6" },
+  { name: "pyunto-tm", version: "0.4.0" },
   { capabilities: { tools: {} } },
 );
 

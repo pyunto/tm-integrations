@@ -37,6 +37,9 @@ const patched = [];
 const deleted = [];
 const softDeleted = [];
 const restored = [];
+const createdTasks = [];
+const taskPatches = [];
+const allocations = [];
 
 function stub() {
   return new Promise((resolve) => {
@@ -52,7 +55,52 @@ function stub() {
         return send(200, { email: "a@b.c", key_name: "test", scopes: ["projects:read"] });
       }
       if (url.pathname === "/api/v1/projects") return send(200, PROJECTS);
-      if (url.pathname === "/api/v1/tasks") return send(200, TASKS);
+      if (url.pathname === "/api/v1/tasks" && req.method === "GET") return send(200, TASKS);
+      if (url.pathname === "/api/v1/tasks" && req.method === "POST") {
+        let raw = "";
+        req.on("data", (c) => { raw += c; });
+        req.on("end", () => {
+          const body = JSON.parse(raw);
+          createdTasks.push(body);
+          send(201, {
+            id: 77, name: body.name ?? "", name_enc: null, assignee_id: null,
+            parent_task_id: body.parent_task_id ?? null, ...body,
+          });
+        });
+        return;
+      }
+      const taskPatch = /^\/api\/v1\/tasks\/(\d+)$/.exec(url.pathname);
+      if (taskPatch && req.method === "PATCH") {
+        const id = Number(taskPatch[1]);
+        const target = TASKS.find((t) => t.id === id);
+        if (!target) return send(404, { detail: "task not found" });
+        let raw = "";
+        req.on("data", (c) => { raw += c; });
+        req.on("end", () => {
+          const body = JSON.parse(raw);
+          taskPatches.push({ id, body });
+          // The real endpoint returns the task plus everything a
+          // dependency dragged along; task 11 follows task 10.
+          const rows = [{ ...target, ...body, name: body.name ?? target.name }];
+          if (id === 10 && (body.start_date || body.end_date)) {
+            rows.push({ ...TASKS[1], start_date: "2026-08-01", end_date: "2026-08-21" });
+          }
+          send(200, rows);
+        });
+        return;
+      }
+      const allocPut = /^\/api\/v1\/tasks\/(\d+)\/allocation$/.exec(url.pathname);
+      if (allocPut && req.method === "PUT") {
+        const id = Number(allocPut[1]);
+        let raw = "";
+        req.on("data", (c) => { raw += c; });
+        req.on("end", () => {
+          const body = JSON.parse(raw);
+          allocations.push({ id, body });
+          send(200, { task_id: id, ...body });
+        });
+        return;
+      }
       if (url.pathname === "/api/v1/blocks" && req.method === "GET") {
         const f = url.searchParams.get("date_from"), t = url.searchParams.get("date_to");
         return send(200, BLOCKS.filter((b) => b.date >= f && b.date <= t));
@@ -340,6 +388,107 @@ check("the restored block leaves the recoverable list", () =>
 const gone = await callTool("restore_time_block", { block_id: 999 });
 check("restoring something already purged is an error, not a crash", () =>
   assert.equal(gone.isError, true));
+
+// ── Task writes ──────────────────────────────────────────────────────────────
+//
+// The plan was read-only through this server until now: an assistant could
+// log time against a task but never add one, finish one, or give one the
+// monthly target the daily draft needs.
+
+console.log("task writes");
+const made = json(await callTool("create_task", {
+  project_id: 1, name: "Rollout", start_date: "2026-09-01", end_date: "2026-09-30",
+}));
+check("creates a task and says what it made", () => {
+  assert.equal(made.created, true);
+  assert.equal(made.name, "Rollout");
+  assert.equal(made.project, "Alpha");
+  assert.deepEqual(createdTasks.at(-1), {
+    project_id: 1, name: "Rollout", start_date: "2026-09-01", end_date: "2026-09-30",
+  });
+});
+check("points at the monthly target, without which the draft skips it", () =>
+  assert.match(made.next, /set_monthly_target/));
+
+const spanYears = json(await callTool("create_task", {
+  project_id: 1, name: "Five year plan", start_date: "2026-01-01", end_date: "2031-01-01",
+}));
+check("a task may span years — the 92-day read cap must not leak in here", () =>
+  assert.equal(spanYears.created, true));
+
+const backwards = await callTool("create_task", {
+  project_id: 1, name: "Nope", start_date: "2026-09-30", end_date: "2026-09-01",
+});
+check("rejects an end before the start", () => assert.equal(backwards.isError, true));
+
+const viewerTask = await callTool("create_task", {
+  project_id: 2, name: "Nope", start_date: "2026-09-01", end_date: "2026-09-02",
+});
+check("refuses a project the user only reads", () => {
+  assert.equal(viewerTask.isError, true);
+  assert.match(viewerTask.content[0].text, /viewer/i);
+});
+
+const finished = json(await callTool("complete_task", { task_id: 10 }));
+check("marks a task done and names it", () => {
+  assert.equal(finished.completed, true);
+  assert.equal(finished.name, "Design");
+  assert.deepEqual(taskPatches.at(-1).body, { completed: true });
+});
+
+const moved = json(await callTool("update_task", {
+  task_id: 10, start_date: "2026-07-20", end_date: "2026-07-30",
+}));
+check("reports the tasks a dependency dragged along, not just the one touched", () => {
+  // A model that answers with only the task it edited leaves the user to
+  // find out later that another task changed date.
+  assert.equal(moved.also_moved.length, 1);
+  assert.equal(moved.also_moved[0].task_id, 11);
+  assert.equal(moved.also_moved[0].start_date, "2026-08-01");
+});
+check("nothing else moved reads as an empty list, not a missing field", () => {
+  assert.deepEqual(finished.also_moved, []);
+});
+
+const archived = json(await callTool("update_task", { task_id: 11, archived: true }));
+check("archives, which is this server's stand-in for deleting a task", () => {
+  assert.equal(archived.task_id, 11);
+  assert.deepEqual(taskPatches.at(-1).body, { archived: true });
+});
+
+const nothing = await callTool("update_task", { task_id: 10 });
+check("a patch with no fields is an error, not a silent no-op", () =>
+  assert.equal(nothing.isError, true));
+
+const unknownTask = await callTool("complete_task", { task_id: 4242 });
+check("an unknown task id says to list them", () => {
+  assert.equal(unknownTask.isError, true);
+  assert.match(unknownTask.content[0].text, /list_tasks/);
+});
+
+const target = json(await callTool("set_monthly_target", {
+  task_id: 10, year_month: "2026-09", hours: 12.5,
+}));
+check("sets a monthly target in hours, stored as minutes", () => {
+  assert.equal(target.hours, 12.5);
+  assert.deepEqual(allocations.at(-1).body, { year_month: "2026-09", target_minutes: 750 });
+});
+const badMonth = await callTool("set_monthly_target", {
+  task_id: 10, year_month: "2026-9", hours: 1,
+});
+check("rejects a malformed month", () => assert.equal(badMonth.isError, true));
+
+check("every task-write tool says which scope it needs", () => {
+  for (const name of ["create_task", "complete_task", "update_task", "set_monthly_target"]) {
+    const tool = TOOLS.find((t) => t.name === name);
+    assert.ok(tool, `missing tool: ${name}`);
+    assert.match(tool.description, /tasks:write/, name);
+  }
+});
+check("update_task does not pretend a task can be deleted", () => {
+  const tool = TOOLS.find((t) => t.name === "update_task");
+  assert.match(tool.description, /no way to delete a task/);
+});
 
 srv.close();
 console.log(`\n${n} checks passed`);
